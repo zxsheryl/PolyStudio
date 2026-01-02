@@ -30,31 +30,42 @@
 
 .home__brand {
   display: flex;
-  gap: 12px;
+  gap: 16px;
   align-items: center;
 }
 
 .home__logo {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: transparent;
+  border: none;
   display: grid;
   place-items: center;
-  font-weight: 800;
-  letter-spacing: -0.08em;
+  padding: 0;
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+.home__logo-img {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  display: block;
 }
 
 .home__title {
-  font-weight: 800;
-  font-size: 18px;
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 
 .home__subtitle {
   font-size: 13px;
   color: rgba(229, 231, 235, 0.72);
-  margin-top: 2px;
+  margin-top: 4px;
+  letter-spacing: 0.01em;
 }
 
 .home__actions {
@@ -555,8 +566,8 @@
 }
 
 [data-theme="light"] .home__logo {
-  background: rgba(15, 23, 42, 0.06);
-  border-color: rgba(15, 23, 42, 0.10);
+  background: transparent;
+  border: none;
 }
 
 [data-theme="light"] .home__subtitle {

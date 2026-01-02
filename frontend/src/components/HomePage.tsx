@@ -234,7 +234,9 @@ export default function HomePage({
       <div className="home__bg" />
       <header className="home__header">
         <div className="home__brand">
-          <div className="home__logo">生</div>
+          <div className="home__logo">
+            <img src="/logo.png" alt="PolyStudio" className="home__logo-img" />
+          </div>
           <div>
             <div className="home__title">PolyStudio</div>
             <div className="home__subtitle">创意不止于画布</div>
