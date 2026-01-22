@@ -63,21 +63,32 @@ class StreamProcessor:
             # 开始流式处理 - 使用 messages 模式确保逐字符流式输出
             # 关键：每个 chunk 立即 yield，不等待，类似 OpenAI 的流式输出
             chunk_count = 0
-            async for chunk in agent.astream(
-                {"messages": langchain_messages},
-                {"recursion_limit": self.recursion_limit},
-                stream_mode=["messages"]  # 使用列表格式，确保1流式输出
-            ):
-                chunk_count += 1
-                logger.debug(f"📦 收到第 {chunk_count} 个 chunk: {type(chunk)}")
-                # 立即处理并发送，不等待 - 确保真正的流式输出
-                event_count = 0
-                async for event in self._handle_chunk(chunk):
-                    event_count += 1
-                    logger.debug(f"📤 发送第 {event_count} 个事件 (chunk {chunk_count}): {event[:100] if len(event) > 100 else event}")
-                    # 立即 yield，确保流式输出，不缓冲
-                    yield event
-                logger.debug(f"✅ Chunk {chunk_count} 处理完成，发送了 {event_count} 个事件")
+            try:
+                async for chunk in agent.astream(
+                    {"messages": langchain_messages},
+                    {"recursion_limit": self.recursion_limit},
+                    stream_mode=["messages"]  # 使用列表格式，确保1流式输出
+                ):
+                    chunk_count += 1
+                    logger.debug(f"📦 收到第 {chunk_count} 个 chunk: {type(chunk)}")
+                    # 立即处理并发送，不等待 - 确保真正的流式输出
+                    event_count = 0
+                    try:
+                        async for event in self._handle_chunk(chunk):
+                            event_count += 1
+                            logger.debug(f"📤 发送第 {event_count} 个事件 (chunk {chunk_count}): {event[:100] if len(event) > 100 else event}")
+                            # 立即 yield，确保流式输出，不缓冲
+                            yield event
+                    except (GeneratorExit, StopAsyncIteration, ConnectionError, BrokenPipeError, OSError) as e:
+                        # 客户端断开，停止处理
+                        logger.info(f"⚠️ 客户端断开连接，停止处理 chunk: {type(e).__name__}")
+                        raise  # 重新抛出，让上层处理
+                    logger.debug(f"✅ Chunk {chunk_count} 处理完成，发送了 {event_count} 个事件")
+            except (GeneratorExit, StopAsyncIteration, ConnectionError, BrokenPipeError, OSError) as e:
+                # 客户端断开连接，停止 agent 处理
+                logger.info(f"ℹ️ 客户端断开连接，停止 agent 流式处理: {type(e).__name__}")
+                # 不继续处理，直接返回
+                return
 
             # 发送完成事件
             # 打印剩余的文本缓冲区

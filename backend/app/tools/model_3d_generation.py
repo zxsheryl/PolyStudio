@@ -99,11 +99,13 @@ def prepare_image_input(image_url: str) -> Tuple[str, str, bool]:
 
 def submit_3d_generation_task(image_url: str, prompt: Optional[str] = None) -> str:
     """
-    提交3D模型生成任务到腾讯云混元生3D API（图生3D模式，可带提示词）
+    提交3D模型生成任务到腾讯云混元生3D API（图生3D模式）
+    
+    注意：API不允许Prompt和ImageBase64/ImageUrl同时存在，此函数只使用image_url，忽略prompt参数。
     
     Args:
         image_url: 图片URL或本地路径
-        prompt: 可选的文本提示词
+        prompt: 此参数会被忽略（API不支持混合模式）
     
     Returns:
         JobId（任务ID）
@@ -115,8 +117,9 @@ def submit_3d_generation_task(image_url: str, prompt: Optional[str] = None) -> s
     base64_str, url_str, is_base64 = prepare_image_input(image_url)
     
     # 构建请求体，符合腾讯云API格式
+    # 注意：API不允许Prompt和ImageBase64/ImageUrl同时存在，所以只传图片相关参数
     payload = {
-        "Prompt": prompt if prompt else None,
+        "Prompt": None,  # 图生3D模式不使用Prompt
         "ImageBase64": base64_str if is_base64 else None,
         "ImageUrl": url_str if not is_base64 else None,
         "MultiViewImages": None,
@@ -469,9 +472,8 @@ def generate_3d_model_tool(prompt: Optional[str] = None, image_url: Optional[str
     3D模型生成服务（腾讯云混元生3D API），支持文生3D和图生3D两种模式。
     
     使用腾讯云混元生3D专业版API：
-    - 文生3D模式：仅使用文本提示词生成3D模型（prompt参数）
-    - 图生3D模式：基于图片生成3D模型（image_url参数）
-    - 混合模式：同时提供prompt和image_url，以文本提示词为主，图片作为参考
+    - 文生3D模式：仅使用文本提示词生成3D模型（只提供prompt参数）
+    - 图生3D模式：基于图片生成3D模型（只提供image_url参数）
         
     Args:
         prompt: 文本提示词，描述要生成的3D模型（文生3D模式，可选）
@@ -481,7 +483,11 @@ def generate_3d_model_tool(prompt: Optional[str] = None, image_url: Optional[str
     Returns:
         生成的3D模型文件路径的JSON字符串或错误信息
     
-    注意：prompt 和 image_url 至少需要提供一个。
+    注意：
+    - prompt 和 image_url 至少需要提供一个
+    - **重要**：prompt 和 image_url 不能同时提供，API不支持混合模式。只能二选一：
+      * 只提供 prompt → 文生3D模式
+      * 只提供 image_url → 图生3D模式
     """
     # Mock 模式：直接返回固定的模型路径
     if MOCK_MODE:
@@ -505,6 +511,12 @@ def generate_3d_model_tool(prompt: Optional[str] = None, image_url: Optional[str
                 "error": "必须提供 prompt（文本提示词）或 image_url（图片URL）中的至少一个"
             }, ensure_ascii=False)
         
+        # 验证不能同时提供两者（API不支持）
+        if prompt and image_url:
+            return json.dumps({
+                "error": "prompt 和 image_url 不能同时提供。请选择一种模式：只提供 prompt（文生3D）或只提供 image_url（图生3D）"
+            }, ensure_ascii=False)
+        
         logger.info(f"🎨 开始生成3D模型: prompt={prompt}, image_url={image_url}, format={format}")
         
         # 检查API Key配置
@@ -523,10 +535,10 @@ def generate_3d_model_tool(prompt: Optional[str] = None, image_url: Optional[str
         
         # 1. 提交生成任务
         if image_url:
-            # 图生3D模式（可带提示词）
-            job_id = submit_3d_generation_task(image_url, prompt)
+            # 图生3D模式（只使用image_url，prompt会被忽略）
+            job_id = submit_3d_generation_task(image_url)
         else:
-            # 文生3D模式（仅使用提示词）
+            # 文生3D模式（只使用prompt）
             job_id = submit_3d_generation_task_with_prompt(prompt)
 
         # 2. 轮询查询任务状态

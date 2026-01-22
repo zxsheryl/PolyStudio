@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { Send, Paperclip, Image as ImageIcon, Sparkles, X, ChevronDown, ChevronRight, Link as LinkIcon, ArrowLeft, Sun, Moon, Download } from 'lucide-react'
+import { Send, Paperclip, Image as ImageIcon, Sparkles, X, ChevronDown, ChevronRight, Link as LinkIcon, ArrowLeft, Sun, Moon, Download, Pause, Play } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import './ChatInterface.css'
 import ExcalidrawCanvas, {
@@ -59,11 +59,15 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [isPaused, setIsPaused] = useState(false) // 暂停状态
   const [uploadedImages, setUploadedImages] = useState<string[]>([]) // 上传的图片URL列表
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatMessagesRef = useRef<HTMLDivElement>(null)
-  // 注意：为了实现“生成一次展示一次”的节奏，我们不再把所有工具调用塞进同一条 assistant 消息里。
+  const abortControllerRef = useRef<AbortController | null>(null) // 用于取消请求
+  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null) // 保存reader引用，用于暂停时关闭
+  const isPausedRef = useRef<boolean>(false) // 使用ref确保能立即检查暂停状态
+  // 注意：为了实现"生成一次展示一次"的节奏，我们不再把所有工具调用塞进同一条 assistant 消息里。
   // delta 会写入最近的纯文本 assistant 消息；tool_call 会创建独立的 step 消息；tool_result 只更新对应 step。
   
   // 工具展开状态
@@ -406,6 +410,10 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
         return { role: msg.role, content }
       })
 
+      // 创建 AbortController 用于取消请求
+      const abortController = new AbortController()
+      abortControllerRef.current = abortController
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -416,6 +424,7 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
           message: trimmed,
           messages: messageHistory.slice(0, -1),
         }),
+        signal: abortController.signal, // 添加 signal 支持取消
       })
 
       if (!response.ok) {
@@ -423,6 +432,7 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
       }
 
       const reader = response.body?.getReader()
+      readerRef.current = reader // 保存reader引用
       const decoder = new TextDecoder()
 
       if (!reader) throw new Error('无法读取响应流')
@@ -471,6 +481,18 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
       }
 
       while (true) {
+        // 检查是否已暂停（使用ref确保能立即检查）
+        if (isPausedRef.current) {
+          // 暂停时，关闭reader
+          try {
+            await reader.cancel()
+          } catch (e) {
+            // 忽略取消时的错误
+          }
+          readerRef.current = null
+          break
+        }
+
         const { done, value } = await reader.read()
         if (done) break
 
@@ -628,6 +650,12 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
         }
       }
     } catch (error) {
+      // 如果是用户主动取消（暂停），不显示错误
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('请求已暂停')
+        // 如果暂停，不清理状态，保持当前消息状态
+        return
+      }
       console.error('请求失败:', error)
       setMessages((prev) => {
         const newMessages = [...prev]
@@ -638,7 +666,12 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
         return newMessages
       })
     } finally {
-      setIsLoading(false)
+      // 只有在非暂停状态下才清理loading状态
+      if (!isPausedRef.current) {
+        setIsLoading(false)
+        abortControllerRef.current = null
+        readerRef.current = null
+      }
       scrollToBottom('smooth')
     }
   }
@@ -726,8 +759,57 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
     }
   }
 
+  // 暂停对话
+  const handlePause = () => {
+    if (isLoading && !isPaused) {
+      setIsPaused(true)
+      isPausedRef.current = true
+      // 取消请求
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+      // 关闭reader
+      if (readerRef.current) {
+        readerRef.current.cancel()
+        readerRef.current = null
+      }
+      setIsLoading(false)
+    }
+  }
+
+  // 恢复对话（重新发送最后一条消息）
+  const handleResume = async () => {
+    if (isPaused) {
+      setIsPaused(false)
+      isPausedRef.current = false
+      // 获取最后一条用户消息
+      const lastUserMessage = messages.filter(m => m.role === 'user').pop()
+      if (lastUserMessage) {
+        // 移除最后一条assistant消息（如果存在且未完成）
+        setMessages((prev) => {
+          const filtered = prev.filter((m, index) => {
+            // 如果是最后一条assistant消息且内容为空或很少，可能是未完成的，移除它
+            if (index === prev.length - 1 && m.role === 'assistant' && (!m.content || m.content.trim().length < 10)) {
+              return false
+            }
+            return true
+          })
+          return filtered
+        })
+        // 重新发送最后一条消息
+        await sendMessage(lastUserMessage.content, true)
+      }
+    }
+  }
+
   const handleSend = async () => {
     if ((!input.trim() && uploadedImages.length === 0) || isLoading) return
+    
+    // 如果之前是暂停状态，先重置
+    if (isPaused) {
+      setIsPaused(false)
+      isPausedRef.current = false
+    }
     
     // 构建消息内容：文本 + 图片URL
     let messageContent = input.trim()
@@ -1422,13 +1504,31 @@ const ChatInterface = ({ initialCanvasId, theme, onToggleTheme, onSetTheme }: Ch
                 rows={1}
                 disabled={isLoading}
               />
-              <button
-                className="send-button"
-                onClick={handleSend}
-                disabled={isLoading || (!input.trim() && uploadedImages.length === 0)}
-              >
-                <Send size={18} />
-              </button>
+              {isLoading && !isPaused ? (
+                <button
+                  className="pause-button"
+                  onClick={handlePause}
+                  title="暂停对话"
+                >
+                  <Pause size={18} />
+                </button>
+              ) : isPaused ? (
+                <button
+                  className="resume-button"
+                  onClick={handleResume}
+                  title="恢复对话"
+                >
+                  <Play size={18} />
+                </button>
+              ) : (
+                <button
+                  className="send-button"
+                  onClick={handleSend}
+                  disabled={isLoading || (!input.trim() && uploadedImages.length === 0)}
+                >
+                  <Send size={18} />
+                </button>
+              )}
             </div>
           </div>
         </div>

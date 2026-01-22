@@ -1212,6 +1212,58 @@
   background-color: #94a3b8;
 }
 
+.pause-button,
+.resume-button {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--panel-bg);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.pause-button:hover {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #f59e0b;
+  transform: scale(1.02);
+}
+
+.resume-button:hover {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #10b981;
+  transform: scale(1.02);
+}
+
+/* 为暂停/恢复按钮添加微妙的图标动画 */
+.pause-button::before,
+.resume-button::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-md);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.pause-button:hover::before {
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+}
+
+.resume-button:hover::before {
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
 /* 响应式适配 */
 @media (max-width: 768px) {
   .chat-panel {
